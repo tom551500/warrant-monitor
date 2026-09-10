@@ -1,5 +1,6 @@
 import datetime
 import os
+import time
 import pandas as pd
 import requests
 from playwright.sync_api import sync_playwright
@@ -8,6 +9,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
 # =================【關鍵分點監控清單】=================
+# 格式：[("股票代碼", "股票名稱", "目標分點關鍵字")]
 WATCH_LIST = [
     ("2427", "聚亨", "台新"),  # 聚亨 -> 監控台新 (含台新高雄)
     ("6223", "旺矽", "凱基"),  # 旺矽 -> 監控凱基分點
@@ -25,7 +27,6 @@ def scrape_branch_data():
     results = {}
 
     with sync_playwright() as p:
-        # 啟動 Chrome 並注入規避自動化偵測之參數
         browser = p.chromium.launch(
             headless=True,
             args=[
@@ -43,7 +44,7 @@ def scrape_branch_data():
         )
         page = context.new_page()
 
-        # 消除 navigator.webdriver 標記
+        # 繞過 navigator.webdriver 檢查
         page.add_init_script(
             "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
         )
@@ -54,7 +55,17 @@ def scrape_branch_data():
                 print(f"正在載入 {name} ({stk}) 分點頁面...")
                 page.goto(url, timeout=30000, wait_until="domcontentloaded")
 
-                # 延長表格等待時間至 15 秒
+                # 1. 關鍵修復：若停在「請稍候...」防護頁，等待其自動完成計算並跳轉 (最多等 10 秒)
+                if "請稍候" in page.title():
+                    print("偵測到驗證過渡頁，等待跳轉中...")
+                    try:
+                        page.wait_for_function(
+                            "!document.title.includes('請稍候')", timeout=10000
+                        )
+                    except Exception:
+                        time.sleep(4)
+
+                # 2. 等待真實籌碼表格載入
                 page.wait_for_selector(
                     "table", timeout=15000, state="attached"
                 )
@@ -78,13 +89,10 @@ def scrape_branch_data():
                 results[(stk, name, target_branch)] = (True, matched_records)
 
             except Exception as e:
-                # 抓取失敗時讀取網頁標題，確認是否被跳轉至驗證頁
-                page_title = (
-                    page.title() if page else "Unknown"
-                )
+                page_title = page.title() if page else "Unknown"
                 results[(stk, name, target_branch)] = (
                     False,
-                    f"網頁標題: {page_title} | {str(e)[:40]}",
+                    f"標題: {page_title} | {str(e)[:40]}",
                 )
 
         browser.close()
