@@ -26,7 +26,7 @@ def scrape_branch_data():
     results = {}
 
     with sync_playwright() as p:
-        # 啟動無頭 Chrome 瀏覽器
+        # 啟動 Chrome 並阻擋廣告圖片載入以加速
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
@@ -37,9 +37,12 @@ def scrape_branch_data():
             url = f"https://histock.tw/stock/branch.aspx?no={stk}"
             try:
                 print(f"正在載入 {name} ({stk}) 分點頁面...")
-                page.goto(url, timeout=30000, wait_until="networkidle")
+                # 關鍵修正：僅等待 HTML 結構載入，不等待廣告封包
+                page.goto(url, timeout=20000, wait_until="domcontentloaded")
 
-                # 取得完全渲染後的 HTML
+                # 強制等待分點表格出現 (最多等 5 秒)
+                page.wait_for_selector("table", timeout=5000)
+
                 html_content = page.content()
                 dfs = pd.read_html(html_content)
 
@@ -56,11 +59,12 @@ def scrape_branch_data():
                             ]
                             matched_records.append(" | ".join(clean_row))
 
-                results[(stk, name, target_branch)] = matched_records
+                results[(stk, name, target_branch)] = (True, matched_records)
 
             except Exception as e:
-                print(f"抓取 {stk} 失敗: {e}")
-                results[(stk, name, target_branch)] = None
+                err_msg = str(e).split("\n")[0]  # 取得首行簡短錯誤訊息
+                print(f"抓取 {stk} 失敗: {err_msg}")
+                results[(stk, name, target_branch)] = (False, err_msg)
 
         browser.close()
 
@@ -73,21 +77,24 @@ def main():
 
     scan_results = scrape_branch_data()
 
-    for (stk, name, target_branch), records in scan_results.items():
-        if records:
-            report_lines.append(f"📌 *【{name} ({stk})】*")
-            seen = set()
-            for rec in records:
-                if rec not in seen:
-                    seen.add(rec)
-                    report_lines.append(f"  🏢 分點數據：`{rec}`")
-            report_lines.append("")
-        elif records == []:
-            report_lines.append(
-                f"⚪ *【{name} ({stk})】*：分點 `{target_branch}` 今日未入前幾大進出榜\n"
-            )
+    for (stk, name, target_branch), (success, data) in scan_results.items():
+        if success:
+            if data:
+                report_lines.append(f"📌 *【{name} ({stk})】*")
+                seen = set()
+                for rec in data:
+                    if rec not in seen:
+                        seen.add(rec)
+                        report_lines.append(f"  🏢 分點數據：`{rec}`")
+                report_lines.append("")
+            else:
+                report_lines.append(
+                    f"⚪ *【{name} ({stk})】*：分點 `{target_branch}` 今日未入前幾大進出榜\n"
+                )
         else:
-            report_lines.append(f"⚠️ *【{name} ({stk})】*：連線數據讀取失敗\n")
+            report_lines.append(
+                f"⚠️ *【{name} ({stk})】*：連線失敗 (`{data}`)\n"
+            )
 
     final_msg = "\n".join(report_lines)
     send_telegram(final_msg)
