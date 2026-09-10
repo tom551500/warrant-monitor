@@ -39,27 +39,38 @@ def scrape_wantgoo_data():
         for stk, name, target_branch in WATCH_LIST:
             url = f"https://www.wantgoo.com/stock/{stk}/major-investors/broker-yield"
             try:
-                print(f"正在載入 {name} ({stk}) 玩股網分點頁面...")
-                page.goto(url, timeout=25000, wait_until="domcontentloaded")
+                print(f"正在載入 {name} ({stk}) 玩股網頁面...")
+                page.goto(url, timeout=30000, wait_until="load")
 
-                # 等待表格元件載入
-                page.wait_for_selector("table, .table", timeout=10000)
+                # 緩衝 5 秒，給予 JavaScript 足夠時間完成數據渲染
+                page.wait_for_timeout(5000)
 
                 html_content = page.content()
-                dfs = pd.read_html(html_content)
-
                 matched_records = []
-                for df in dfs:
-                    df_str = df.astype(str)
-                    for _, row in df_str.iterrows():
-                        row_text = " ".join(row.values)
-                        if target_branch in row_text:
-                            clean_row = [
-                                v.strip()
-                                for v in row.values
-                                if v != "nan" and v != "None" and v.strip()
-                            ]
-                            matched_records.append(" | ".join(clean_row))
+
+                # 1. 嘗試由 Pandas 解析 HTML 表格
+                try:
+                    dfs = pd.read_html(html_content)
+                    for df in dfs:
+                        df_str = df.astype(str)
+                        for _, row in df_str.iterrows():
+                            row_text = " ".join(row.values)
+                            if target_branch in row_text:
+                                clean_row = [
+                                    v.strip()
+                                    for v in row.values
+                                    if v != "nan" and v != "None" and v.strip()
+                                ]
+                                matched_records.append(" | ".join(clean_row))
+                except Exception:
+                    pass
+
+                # 2. 若未抓到表格，直接自網頁全文萃取包含目標分點的文字行
+                if not matched_records:
+                    lines = page.inner_text("body").split("\n")
+                    for line in lines:
+                        if target_branch in line and len(line.strip()) > 2:
+                            matched_records.append(line.strip())
 
                 results[(stk, name, target_branch)] = (True, matched_records)
 
@@ -96,9 +107,7 @@ def main():
                     f"⚪ *【{name} ({stk})】*：分點 `{target_branch}` 今日未入前幾大進出榜\n"
                 )
         else:
-            report_lines.append(
-                f"⚠️ *【{name} ({stk})】*：{data}\n"
-            )
+            report_lines.append(f"⚠️ *【{name} ({stk})】*：{data}\n")
 
     final_msg = "\n".join(report_lines)
     send_telegram(final_msg)
