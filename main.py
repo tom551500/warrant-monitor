@@ -1,6 +1,5 @@
 import datetime
 import os
-import time
 import pandas as pd
 import requests
 from playwright.sync_api import sync_playwright
@@ -23,52 +22,28 @@ def send_telegram(msg):
     requests.post(url, data=payload)
 
 
-def scrape_branch_data():
+def scrape_wantgoo_data():
     results = {}
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-            ],
+            args=["--no-sandbox", "--disable-setuid-sandbox"],
         )
-
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            viewport={"width": 1366, "height": 768},
             locale="zh-TW",
-            timezone_id="Asia/Taipei",
         )
         page = context.new_page()
 
-        # 繞過 navigator.webdriver 檢查
-        page.add_init_script(
-            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-        )
-
         for stk, name, target_branch in WATCH_LIST:
-            url = f"https://histock.tw/stock/branch.aspx?no={stk}"
+            url = f"https://www.wantgoo.com/stock/{stk}/major-investors/broker-yield"
             try:
-                print(f"正在載入 {name} ({stk}) 分點頁面...")
-                page.goto(url, timeout=30000, wait_until="domcontentloaded")
+                print(f"正在載入 {name} ({stk}) 玩股網分點頁面...")
+                page.goto(url, timeout=25000, wait_until="domcontentloaded")
 
-                # 1. 關鍵修復：若停在「請稍候...」防護頁，等待其自動完成計算並跳轉 (最多等 10 秒)
-                if "請稍候" in page.title():
-                    print("偵測到驗證過渡頁，等待跳轉中...")
-                    try:
-                        page.wait_for_function(
-                            "!document.title.includes('請稍候')", timeout=10000
-                        )
-                    except Exception:
-                        time.sleep(4)
-
-                # 2. 等待真實籌碼表格載入
-                page.wait_for_selector(
-                    "table", timeout=15000, state="attached"
-                )
+                # 等待表格元件載入
+                page.wait_for_selector("table, .table", timeout=10000)
 
                 html_content = page.content()
                 dfs = pd.read_html(html_content)
@@ -89,10 +64,10 @@ def scrape_branch_data():
                 results[(stk, name, target_branch)] = (True, matched_records)
 
             except Exception as e:
-                page_title = page.title() if page else "Unknown"
+                err_brief = str(e).split("\n")[0][:50]
                 results[(stk, name, target_branch)] = (
                     False,
-                    f"標題: {page_title} | {str(e)[:40]}",
+                    f"連線失敗: {err_brief}",
                 )
 
         browser.close()
@@ -104,7 +79,7 @@ def main():
     today = datetime.date.today().strftime("%Y/%m/%d")
     report_lines = [f"🎯 *指定關鍵分點買賣監控日報 ({today})*\n"]
 
-    scan_results = scrape_branch_data()
+    scan_results = scrape_wantgoo_data()
 
     for (stk, name, target_branch), (success, data) in scan_results.items():
         if success:
@@ -122,7 +97,7 @@ def main():
                 )
         else:
             report_lines.append(
-                f"⚠️ *【{name} ({stk})】*：連線失敗 (`{data}`)\n"
+                f"⚠️ *【{name} ({stk})】*：{data}\n"
             )
 
     final_msg = "\n".join(report_lines)
