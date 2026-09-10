@@ -1,3 +1,4 @@
+import datetime
 import os
 import pandas as pd
 import requests
@@ -10,14 +11,24 @@ MARKET_MAKERS = ["9800", "1480", "9200", "5850", "8880", "7000"]
 def send_telegram(msg):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}
-    requests.post(url, data=payload)
+
+    res = requests.post(url, data=payload)
+    print(f"Telegram 推播狀態碼: {res.status_code}")
+
+    if res.status_code != 200:
+        print(f"❌ Telegram 發送失敗，回應內容: {res.text}")
+    else:
+        print("✅ Telegram 訊息發送成功！")
 
 
 def main():
-    target_warrants = ["030001", "030002"]
-    date_roc = "115/09/08"
+    # 自動轉為民國年格式 (例如: 115/09/08)
+    today = datetime.date.today()
+    roc_year = today.year - 1911
+    date_roc = f"{roc_year}/{today.strftime('%m/%d')}"
 
-    report_lines = [f"📊 *權證主力籌碼日報 ({date_roc})*\n"]
+    target_warrants = ["030001", "030002"]
+    report_lines = [f"📊 *權證主力籌碼測試日報 ({date_roc})*\n"]
 
     for stk in target_warrants:
         url = f"https://www.tpex.org.tw/web/stock/aftertrading/broker_trading/brokerBS_result.php?l=zh-tw&d={date_roc}&stk={stk}"
@@ -69,8 +80,9 @@ def main():
     final_msg = (
         "\n".join(report_lines)
         if len(report_lines) > 1
-        else "⚠️ 今日查無異常大買資料。"
+        else f"⚠️ 權證系統測試中 ({date_roc})：今日查無資料或為非交易日。"
     )
+
     send_telegram(final_msg)
 
 
