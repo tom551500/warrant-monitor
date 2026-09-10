@@ -17,9 +17,10 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: 安裝必要套件
+      - name: 安裝 Playwright 雲端瀏覽器
         run: |
-          pip install pandas requests lxml beautifulsoup4 html5lib
+          pip install pandas requests playwright beautifulsoup4 html5lib lxml
+          playwright install chromium
 
       - name: 執行籌碼分析並推播
         env:
