@@ -1,0 +1,28 @@
+name: Warrant Chip Auto Push
+
+on:
+  schedule:
+    - cron: '0 9 * * 1-5'  # 台灣時間平日 17:00 自動執行
+  workflow_dispatch:        # 支援手動觸發按鈕
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 載入專案程式碼
+        uses: actions/checkout@v3
+
+      - name: 安裝 Python 環境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: 安裝套件
+        run: |
+          pip install pandas requests
+
+      - name: 執行籌碼分析並推播
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: python main.py
